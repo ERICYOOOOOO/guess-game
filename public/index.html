@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>欢乐竞猜</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f0f2f5; }
+        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        h2 { margin-top: 0; color: #333; }
+        input, button { padding: 10px; width: 100%; box-sizing: border-box; margin-top: 10px; border-radius: 5px; border: 1px solid #ddd; }
+        button { background: #007bff; color: white; border: none; cursor: pointer; font-weight: bold; }
+        button:hover { background: #0056b3; }
+        button.admin-btn { background: #dc3545; }
+        
+        .hidden { display: none; }
+        .leaderboard-item { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee; }
+        .leaderboard-item:first-child { font-weight: bold; color: #d9534f; } /* 第一名红色高亮 */
+        
+        #my-status { background: #e3f2fd; color: #0d47a1; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+
+    <div id="login-view" class="card hidden">
+        <h2>👋 欢迎！请先留个名</h2>
+        <input type="text" id="username-input" placeholder="输入你的昵称">
+        <button onclick="login()">进入游戏</button>
+    </div>
+
+    <div id="game-view" class="card hidden">
+        <div id="my-status">
+            你好，<span id="display-name"></span>！当前积分: <strong id="display-score">0</strong>
+        </div>
+
+        <h3>📝 提交本轮竞猜</h3>
+        <p id="round-status-text" style="color:gray; font-size: 0.9em;">本轮竞猜进行中...</p>
+        <input type="text" id="guess-input" placeholder="输入你的答案 (例如: A)">
+        <button onclick="submitGuess()">提交答案</button>
+        <p id="guess-feedback" style="color: green; margin-top: 5px;"></p>
+    </div>
+
+    <div class="card">
+        <h3>🏆 实时排行榜</h3>
+        <div id="leaderboard-list">正在加载...</div>
+    </div>
+
+    <div class="card" style="border-top: 3px solid red;">
+        <h3>🔧 管理员控制台</h3>
+        <input type="text" id="admin-answer" placeholder="输入正确答案进行结算">
+        <button class="admin-btn" onclick="adminSettle()">结算本轮并加分</button>
+    </div>
+
+    <script>
+        // 页面加载时，获取数据
+        fetchStatus();
+
+        async function fetchStatus() {
+            const res = await fetch('/api/status');
+            const data = await res.json();
+
+            // 更新排行榜
+            const list = document.getElementById('leaderboard-list');
+            list.innerHTML = data.leaderboard.map((u, i) => 
+                `<div class="leaderboard-item"><span>#${i+1} ${u.name}</span> <span>${u.score}分</span></div>`
+            ).join('');
+
+            // 切换视图
+            if (data.isLoggedIn) {
+                document.getElementById('login-view').classList.add('hidden');
+                document.getElementById('game-view').classList.remove('hidden');
+                document.getElementById('display-name').innerText = data.currentUser;
+                document.getElementById('display-score').innerText = data.myScore;
+                
+                if (data.myGuess) {
+                    document.getElementById('guess-feedback').innerText = `你已提交: ${data.myGuess}`;
+                } else {
+                    document.getElementById('guess-feedback').innerText = '';
+                }
+            } else {
+                document.getElementById('login-view').classList.remove('hidden');
+            }
+        }
+
+        async function login() {
+            const username = document.getElementById('username-input').value;
+            if(!username) return alert('请输入名字');
+            
+            await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username })
+            });
+            fetchStatus(); // 刷新状态
+        }
+
+        async function submitGuess() {
+            const guess = document.getElementById('guess-input').value;
+            if(!guess) return alert('请填写答案');
+
+            const res = await fetch('/api/guess', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ guess })
+            });
+            
+            if(res.ok) {
+                alert('提交成功！等待管理员开奖。');
+                fetchStatus();
+            } else {
+                alert(await res.text());
+            }
+        }
+
+        async function adminSettle() {
+            const correctAnswer = document.getElementById('admin-answer').value;
+            if(!correctAnswer) return alert('请输入正确答案');
+            if(!confirm(`确定正确答案是 "${correctAnswer}" 吗？这将更新所有人的分数。`)) return;
+
+            const res = await fetch('/api/admin/settle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ correctAnswer })
+            });
+
+            const data = await res.json();
+            alert(`结算完成！共有 ${data.winners.length} 人答对。`);
+            fetchStatus();
+        }
+    </script>
+</body>
+</html>
