@@ -14,10 +14,18 @@
         button.admin-btn { background: #dc3545; }
         
         .hidden { display: none; }
-        .leaderboard-item { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee; }
-        .leaderboard-item:first-child { font-weight: bold; color: #d9534f; } /* 第一名红色高亮 */
+        .leaderboard-item { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee; transition: all 0.3s ease; }
+        .leaderboard-item:first-child { font-weight: bold; color: #d9534f; } 
         
+        /* 自己的名字高亮 */
+        .my-row { background-color: #e3f2fd; border-left: 4px solid #007bff; }
+
         #my-status { background: #e3f2fd; color: #0d47a1; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        
+        /* 分数跳动动画 */
+        .score-change { color: red; transform: scale(1.3); transition: transform 0.2s; display: inline-block; }
+
+        .status-bar { font-size: 12px; color: #888; text-align: right; margin-top: 5px; }
     </style>
 </head>
 <body>
@@ -37,11 +45,12 @@
         <p id="round-status-text" style="color:gray; font-size: 0.9em;">本轮竞猜进行中...</p>
         <input type="text" id="guess-input" placeholder="输入你的答案 (例如: A)">
         <button onclick="submitGuess()">提交答案</button>
-        <p id="guess-feedback" style="color: green; margin-top: 5px;"></p>
+        <p id="guess-feedback" style="color: green; margin-top: 5px; font-weight: bold;"></p>
     </div>
 
     <div class="card">
         <h3>🏆 实时排行榜</h3>
+        <div class="status-bar">上次数据更新: <span id="last-updated">--:--:--</span></div>
         <div id="leaderboard-list">正在加载...</div>
     </div>
 
@@ -52,33 +61,73 @@
     </div>
 
     <script>
-        // 页面加载时，获取数据
+        // 定义全局变量
+        let lastScore = 0; 
+        let isFirstLoad = true;
+
+        // 页面加载时立即执行一次
         fetchStatus();
 
-        async function fetchStatus() {
-            const res = await fetch('/api/status');
-            const data = await res.json();
+        // --- 核心：每 2 秒自动刷新一次 ---
+        setInterval(() => {
+            fetchStatus(true); // true 代表这是自动刷新
+        }, 2000);
 
-            // 更新排行榜
-            const list = document.getElementById('leaderboard-list');
-            list.innerHTML = data.leaderboard.map((u, i) => 
-                `<div class="leaderboard-item"><span>#${i+1} ${u.name}</span> <span>${u.score}分</span></div>`
-            ).join('');
+        async function fetchStatus(isAutoRefresh = false) {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
 
-            // 切换视图
-            if (data.isLoggedIn) {
-                document.getElementById('login-view').classList.add('hidden');
-                document.getElementById('game-view').classList.remove('hidden');
-                document.getElementById('display-name').innerText = data.currentUser;
-                document.getElementById('display-score').innerText = data.myScore;
-                
-                if (data.myGuess) {
-                    document.getElementById('guess-feedback').innerText = `你已提交: ${data.myGuess}`;
+                // 1. 更新“上次更新时间” (心跳指示器)
+                const now = new Date();
+                const timeString = now.toLocaleTimeString();
+                document.getElementById('last-updated').innerText = timeString;
+
+                // 2. 更新排行榜 HTML
+                const list = document.getElementById('leaderboard-list');
+                list.innerHTML = data.leaderboard.map((u, i) => {
+                    // 判断是不是自己，如果是，加个高亮样式
+                    const isMe = u.name === data.currentUser;
+                    const rankEmoji = i === 0 ? '🥇 ' : (i === 1 ? '🥈 ' : (i === 2 ? '🥉 ' : `#${i+1} `));
+                    return `
+                    <div class="leaderboard-item ${isMe ? 'my-row' : ''}">
+                        <span>${rankEmoji} ${u.name}</span> 
+                        <strong>${u.score}分</strong>
+                    </div>`;
+                }).join('');
+
+                // 3. 处理登录状态和视图切换
+                if (data.isLoggedIn) {
+                    document.getElementById('login-view').classList.add('hidden');
+                    document.getElementById('game-view').classList.remove('hidden');
+                    document.getElementById('display-name').innerText = data.currentUser;
+                    
+                    // 4. 分数变化特效
+                    const scoreElem = document.getElementById('display-score');
+                    // 只有当 分数变大 且 不是第一次加载页面时，才播放动画
+                    if (data.myScore > lastScore && !isFirstLoad) {
+                        console.log("分数增加了！播放动画");
+                        scoreElem.classList.add('score-change');
+                        setTimeout(() => scoreElem.classList.remove('score-change'), 500);
+                    }
+                    scoreElem.innerText = data.myScore;
+                    lastScore = data.myScore; // 更新记录
+                    isFirstLoad = false;
+
+                    // 5. 竞猜反馈
+                    if (data.myGuess) {
+                        document.getElementById('guess-feedback').innerText = `✅ 你已提交: ${data.myGuess}`;
+                    } else {
+                        document.getElementById('guess-feedback').innerText = '';
+                    }
                 } else {
-                    document.getElementById('guess-feedback').innerText = '';
+                    document.getElementById('login-view').classList.remove('hidden');
                 }
-            } else {
-                document.getElementById('login-view').classList.remove('hidden');
+
+            } catch (e) {
+                console.error("刷新状态失败:", e);
+                // 可以在这里把 'last-updated' 变成红色，提示用户网络断了
+                document.getElementById('last-updated').style.color = 'red';
             }
         }
 
@@ -91,7 +140,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username })
             });
-            fetchStatus(); // 刷新状态
+            fetchStatus(); 
         }
 
         async function submitGuess() {
@@ -105,8 +154,7 @@
             });
             
             if(res.ok) {
-                alert('提交成功！等待管理员开奖。');
-                fetchStatus();
+                fetchStatus(); // 提交后立即刷新一次
             } else {
                 alert(await res.text());
             }
@@ -115,7 +163,7 @@
         async function adminSettle() {
             const correctAnswer = document.getElementById('admin-answer').value;
             if(!correctAnswer) return alert('请输入正确答案');
-            if(!confirm(`确定正确答案是 "${correctAnswer}" 吗？这将更新所有人的分数。`)) return;
+            if(!confirm(`确定正确答案是 "${correctAnswer}" 吗？`)) return;
 
             const res = await fetch('/api/admin/settle', {
                 method: 'POST',
@@ -125,7 +173,7 @@
 
             const data = await res.json();
             alert(`结算完成！共有 ${data.winners.length} 人答对。`);
-            fetchStatus();
+            fetchStatus(); // 结算后立即刷新
         }
     </script>
 </body>
